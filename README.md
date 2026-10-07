@@ -29,7 +29,7 @@ Answer `y` to add the marketplace, then pick a scope (user scope is the default)
 
 | Action | Result |
 | --- | --- |
-| `/artifacts` | Open the pane and give it the keyboard |
+| `/local-artifacts` | Open the pane and give it the keyboard |
 | Tab | Select an item |
 | Enter, or `o` | Open the selected item |
 | Double-click | Open an item |

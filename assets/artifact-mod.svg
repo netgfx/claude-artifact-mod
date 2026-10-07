@@ -74,7 +74,7 @@
   <g>
     <rect x="944" y="100" width="596" height="44" fill="#1f1f23"/>
     <text x="968" y="129" class="b">Artifacts</text>
-    <text x="1516" y="129" text-anchor="end" class="dim" style="font-size:15px">/artifacts</text>
+    <text x="1516" y="129" text-anchor="end" class="dim" style="font-size:15px">/local-artifacts</text>
 
     <text x="968" y="186" class="b">9 artifacts</text>
     <text x="1516" y="186" text-anchor="end" class="dim">page 1/2</text>

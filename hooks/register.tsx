@@ -6,6 +6,7 @@ import type { Artifact } from '../types'
 const PANE = 'artifact-mod'
 const TITLE = 'Artifacts'
 const ITEM = 'a:'
+const COMMAND = 'local-artifacts'
 
 const artifacts = atom({ plugin: 'artifact-mod', key: 'artifacts' } as const, [])
 const page = atom({ plugin: 'artifact-mod', key: 'page' } as const, 0)
@@ -319,10 +320,15 @@ async function pressItem($: EngineInterface, path: string) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({
-      name: 'artifacts',
-      description: 'Show the files produced in this session',
-    })
+    // Claude Code has its own built-in /artifacts, so the mod's command needs a name of its own.
+    try {
+      await $.command.register({
+        name: COMMAND,
+        description: 'Show the media files and documents created in this session',
+      })
+    } catch {
+      // Without the command the pane still opens and tracks; only the shortcut is lost.
+    }
 
     if ((await read($, artifacts)).length === 0) {
       const saved = await $.store.get(await storeKey($))
@@ -342,7 +348,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('command.run', { command: 'artifacts' }, async $ => {
+  on('command.run', { command: COMMAND }, async $ => {
     await prune($)
     await $.ui.open({ id: PANE, title: TITLE, focus: true })
 
