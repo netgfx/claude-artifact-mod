@@ -1,0 +1,12 @@
+{
+  "name": "claude-artifact-mod",
+  "owner": { "name": "Michael Dobekidis" },
+  "metadata": { "description": "Claude Code mods for tracking and opening locally produced artifacts." },
+  "plugins": [
+    {
+      "name": "artifact-mod",
+      "source": "./",
+      "description": "A side pane listing every file produced in this session, with type icons, pagination, and open-with-default-app."
+    }
+  ]
+}
