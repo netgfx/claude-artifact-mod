@@ -14,7 +14,7 @@ const PANE = {
   },
 } as const
 
-/** A fake disk: paths that exist, each written "now". */
+/** A fake disk: `files` already exist; a writing tool creates the file it names, "now". */
 const KEY = 'a:C:\\work\\chart.png'
 const norm = (p: string) => p.replace(/\\/g, '/')
 function disk(on: On, files: Set<string>, opened: string[][]) {
@@ -22,7 +22,11 @@ function disk(on: On, files: Set<string>, opened: string[][]) {
   mock.env(on, { OS: 'Windows_NT' })
   on('session.cwd', () => ({ value: 'C:/work' }))
   on('session.id', () => ({ value: 'sid-1' }))
-  on('fs.list', () => ({ value: [] }))
+  on('fs.list', () => ({
+    value: [...files]
+      .filter(p => /^C:\/work\/[^/]+$/.test(p))
+      .map(p => ({ name: p.slice('C:/work/'.length), kind: 'file' as const, mtimeMs: Date.now() })),
+  }))
   on('fs.exists', (_$, e) => ({ value: files.has(norm(e.path)) }))
   on('fs.stat', (_$, e) => {
     if (!files.has(norm(e.path))) return { deny: 'ENOENT' }
@@ -34,17 +38,20 @@ function disk(on: On, files: Set<string>, opened: string[][]) {
     opened.push([...e.argv])
     return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  // The engine marks read-only tools' results; Read stands in for them here.
-  on('tool.call', (_$, e) =>
-    e.tool === 'Read'
+  // The engine marks read-only tools' results; Read and the screenshot tool stand in for them here.
+  on('tool.call', (_$, e) => {
+    const input = e as unknown as Record<string, unknown>
+    const target = input.file_path ?? input.filename
+    if (e.tool !== 'Read' && typeof target === 'string') files.add(norm(target))
+    return e.tool === 'Read' || e.tool === 'mcp__playwright__browser_take_screenshot'
       ? { result: {}, text: 'ok', isReadOnly: true as const }
-      : { result: {}, text: 'ok' },
-  )
+      : { result: {}, text: 'ok' }
+  })
 }
 
 describe('artifact-mod', () => {
   test('a written file is listed with its icon, opened on Enter, dropped once deleted', async ($, on) => {
-    const files = new Set(['C:/work/chart.png'])
+    const files = new Set<string>()
     const opened: string[][] = []
     disk(on, files, opened)
 
@@ -69,11 +76,9 @@ describe('artifact-mod', () => {
   })
 
   test('many artifacts page through Next', async ($, on) => {
-    const files = new Set<string>()
-    for (let i = 0; i < 15; i++) files.add(`C:/work/f${i}.txt`)
-    disk(on, files, [])
+    disk(on, new Set(), [])
 
-    for (const path of files) await $.tool.call({ tool: 'Write', file_path: path, content: 'x' })
+    for (let i = 0; i < 15; i++) await $.tool.call({ tool: 'Write', file_path: `C:/work/f${i}.txt`, content: 'x' })
 
     const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
     expect((await ui.find({ text: /page 1\/3/ }))).toBeDefined()
@@ -83,13 +88,81 @@ describe('artifact-mod', () => {
   })
 
   test('read-only tools add nothing', async ($, on) => {
-    const files = new Set(['C:/work/a.md'])
-    disk(on, files, [])
+    disk(on, new Set(['C:/work/a.md']), [])
 
     await $.tool.call({ tool: 'Read', file_path: 'C:/work/a.md' })
 
     const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
     expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a read-only tool that saves a file still lists it', async ($, on) => {
+    disk(on, new Set(), [])
+
+    await $.tool.call({
+      tool: 'mcp__playwright__browser_take_screenshot',
+      filename: 'C:/work/assets/shot.png',
+      scale: 'css',
+    })
+
+    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    expect(await ui.find({ key: 'a:C:\\work\\assets\\shot.png' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('one file reached by two spellings is listed once', async ($, on) => {
+    disk(on, new Set(), [])
+
+    // The cwd scan finds the same file the tool input names with backslashes.
+    await $.tool.call({ tool: 'Write', file_path: 'C:\\work\\NOTES.md', content: 'x' })
+
+    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('background task .output logs are not listed', async ($, on) => {
+    disk(on, new Set(), [])
+
+    await $.tool.call({ tool: 'Write', file_path: 'C:/tmp/claude/tasks/b1.output', content: 'x' })
+
+    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('code and config files are not listed', async ($, on) => {
+    disk(on, new Set(), [])
+
+    await $.tool.call({ tool: 'Write', file_path: 'C:/work/hooks/register.tsx', content: 'x' })
+    await $.tool.call({ tool: 'Write', file_path: 'C:/work/package.json', content: '{}' })
+
+    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('editing a file that existed before the session is not listed', async ($, on) => {
+    disk(on, new Set(['C:/work/README.md', 'C:/work/assets/logo.png']), [])
+
+    await $.tool.call({ tool: 'Edit', file_path: 'C:\\work\\README.md', old_string: 'a', new_string: 'b' })
+    await $.tool.call({ tool: 'Write', file_path: 'C:/work/assets/logo.png', content: 'x' })
+
+    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a file this session made stays listed when rewritten', async ($, on) => {
+    disk(on, new Set(), [])
+
+    await $.tool.call({ tool: 'Write', file_path: 'C:/work/report.pdf', content: 'v1' })
+    await $.tool.call({ tool: 'Write', file_path: 'C:/work/report.pdf', content: 'v2' })
+
+    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    expect(await ui.find({ key: 'a:C:\\work\\report.pdf' })).toBeDefined()
+    expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
     await ui.unmount()
   })
 })

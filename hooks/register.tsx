@@ -25,21 +25,17 @@ let platform: 'win' | 'mac' | 'linux' | undefined
 
 // ---------- file types ----------
 
+/** The only kinds listed: media and documents. Code, config, archives and binaries are not artifacts. */
 const ICONS: [string, readonly string[]][] = [
   ['🎨', ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'ico', 'tif', 'tiff', 'heic', 'avif']],
   ['📕', ['pdf']],
   ['📘', ['doc', 'docx', 'odt', 'rtf']],
   ['📙', ['ppt', 'pptx', 'odp', 'key']],
-  ['📊', ['csv', 'tsv', 'xls', 'xlsx', 'ods', 'parquet']],
-  ['📝', ['md', 'markdown', 'txt', 'log', 'rst']],
-  ['🌐', ['html', 'htm', 'css']],
-  ['🔧', ['json', 'yaml', 'yml', 'toml', 'ini', 'xml', 'env', 'cfg', 'conf']],
-  ['💻', ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'c', 'h', 'cpp', 'hpp', 'cs', 'php', 'swift', 'sh', 'ps1', 'bat', 'sql', 'lua', 'ipynb']],
+  ['📊', ['csv', 'tsv', 'xls', 'xlsx', 'ods']],
+  ['📝', ['md', 'markdown', 'txt', 'rst']],
+  ['🌐', ['html', 'htm']],
   ['🎵', ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']],
   ['🎬', ['mp4', 'mov', 'mkv', 'webm', 'avi']],
-  ['📦', ['zip', 'tar', 'gz', 'tgz', '7z', 'rar', 'bz2', 'xz']],
-  ['🔤', ['ttf', 'otf', 'woff', 'woff2']],
-  ['🚀', ['exe', 'msi', 'dmg', 'app', 'apk']],
 ]
 
 function extOf(path: string): string {
@@ -51,6 +47,11 @@ function extOf(path: string): string {
 function iconOf(path: string): string {
   const ext = extOf(path)
   return ICONS.find(([, exts]) => exts.includes(ext))?.[0] ?? '📄'
+}
+
+function isShown(path: string): boolean {
+  const ext = extOf(path)
+  return ICONS.some(([, exts]) => exts.includes(ext))
 }
 
 // ---------- paths ----------
@@ -68,25 +69,56 @@ function isAbsolute(path: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('/') || path.startsWith('\\\\')
 }
 
-function sameFile(a: string, b: string): boolean {
-  // Windows paths compare without case and without slash direction.
-  if (/^[A-Za-z]:/.test(a) || /^[A-Za-z]:/.test(b)) {
-    return a.replace(/\//g, '\\').toLowerCase() === b.replace(/\//g, '\\').toLowerCase()
-  }
-  return a === b
+function isWindowsPath(path: string): boolean {
+  return /^[A-Za-z]:/.test(path) || path.startsWith('\\\\')
 }
 
-const IGNORED = /[\\/](\.git|node_modules|__pycache__|\.venv)[\\/]/
+/** One spelling per file: Windows paths get backslashes, single separators. */
+function nativePath(path: string): string {
+  if (!isWindowsPath(path)) return path.replace(/\/{2,}/g, '/')
+  const unc = path.startsWith('\\\\') || path.startsWith('//')
+  const body = path.replace(/\//g, '\\').replace(/\\{2,}/g, '\\')
 
-/** Strings that may name a file: path-like input fields, and tokens of a shell command. */
-function candidatesOf(tool: string, input: Record<string, unknown>): string[] {
+  return unc ? `\\${body}` : body
+}
+
+/** Windows paths compare without case and without slash direction. */
+function fileKey(path: string): string {
+  const native = nativePath(path)
+
+  return isWindowsPath(native) ? native.toLowerCase() : native
+}
+
+function sameFile(a: string, b: string): boolean {
+  return fileKey(a) === fileKey(b)
+}
+
+function unique(list: Artifact[]): Artifact[] {
+  const seen = new Set<string>()
+
+  return list.filter(a => !seen.has(fileKey(a.path)) && seen.add(fileKey(a.path)))
+}
+
+/** Tool plumbing, not work: VCS and dependency folders, and Claude Code's background-task logs. */
+const IGNORED = /[\\/](\.git|node_modules|__pycache__|\.venv)[\\/]|\.output$/i
+
+const PATH_KEY = /path|file|output|dest|target|save/i
+/** Fields that name a file the tool writes, even when the tool calls itself read-only (screenshots). */
+const OUTPUT_KEY = /filename|output|dest|save/i
+
+/**
+ * Strings that may name a file: path-like input fields, and tokens of a shell command.
+ * For a read-only tool, only fields that name an output count.
+ */
+function candidatesOf(tool: string, input: Record<string, unknown>, outputsOnly = false): string[] {
   const out: string[] = []
   for (const [k, v] of Object.entries(input)) {
     const values = Array.isArray(v) ? v : [v]
     for (const one of values) {
       if (typeof one !== 'string') continue
-      if (k === 'command' && (tool === 'Bash' || tool === 'PowerShell')) out.push(...shellTokens(one))
-      else if (/path|file|output|dest|target|save/i.test(k) && one.length < 1024) out.push(one)
+      if (k === 'command' && (tool === 'Bash' || tool === 'PowerShell')) {
+        if (!outputsOnly) out.push(...shellTokens(one))
+      } else if ((outputsOnly ? OUTPUT_KEY : PATH_KEY).test(k) && one.length < 1024) out.push(one)
     }
   }
 
@@ -109,19 +141,55 @@ function shellTokens(command: string): string[] {
 
 // ---------- tracking ----------
 
-async function track($: EngineInterface, raw: string[], since: number) {
+function absOf(cwd: string, path: string): string {
+  return nativePath(isAbsolute(path) ? path : `${cwd}/${path.replace(/^\.[\\/]/, '')}`)
+}
+
+async function cwdFiles($: EngineInterface, cwd: string): Promise<{ path: string; mtimeMs: number }[]> {
+  try {
+    return (await $.fs.list(cwd))
+      .filter(entry => entry.kind === 'file' && isShown(entry.name))
+      .map(entry => ({ path: absOf(cwd, entry.name), mtimeMs: entry.mtimeMs }))
+  } catch {
+    // An unreadable working directory adds nothing.
+    return []
+  }
+}
+
+/** Files that exist before a tool runs: one the tool then writes was modified, not made. */
+async function existing($: EngineInterface, raw: string[]): Promise<Set<string>> {
   const cwd = await $.session.cwd()
+  const keys = new Set<string>()
+  for (const path of raw) {
+    const abs = absOf(cwd, path)
+    try {
+      if (await $.fs.exists(abs)) keys.add(fileKey(abs))
+    } catch {
+      // Unknown: treated as new.
+    }
+  }
+  for (const f of await cwdFiles($, cwd)) keys.add(fileKey(f.path))
+
+  return keys
+}
+
+async function track($: EngineInterface, raw: string[], since: number, scanCwd: boolean, existed: Set<string>) {
+  const cwd = await $.session.cwd()
+  const listed = await read($, artifacts)
   const seen = new Set<string>()
   const found: string[] = []
   const consider = async (path: string) => {
-    const abs = isAbsolute(path) ? path : `${cwd}/${path.replace(/^\.[\\/]/, '')}`
-    if (seen.has(abs.toLowerCase())) return
-    seen.add(abs.toLowerCase())
+    const abs = absOf(cwd, path)
+    if (seen.has(fileKey(abs))) return
+    seen.add(fileKey(abs))
     try {
       const st = await $.fs.stat(abs, { resolve: true })
       if (st.kind !== 'file' || st.mtimeMs < since - MTIME_SLACK_MS) return
-      const real = st.realPath ?? abs
-      if (!IGNORED.test(real)) found.push(real)
+      const real = nativePath(st.realPath ?? abs)
+      if (IGNORED.test(real) || !isShown(real) || found.some(p => sameFile(p, real))) return
+      // Only files this session made; rewriting one it made keeps it listed.
+      const isNew = !existed.has(fileKey(abs)) && !existed.has(fileKey(real))
+      if (isNew || listed.some(a => sameFile(a.path, real))) found.push(real)
     } catch {
       // Not a file on disk: not an artifact.
     }
@@ -130,12 +198,10 @@ async function track($: EngineInterface, raw: string[], since: number) {
   for (const path of raw) await consider(path)
 
   // Files a command wrote without naming them: the working directory's top level.
-  try {
-    for (const entry of await $.fs.list(cwd)) {
-      if (entry.kind === 'file' && entry.mtimeMs >= since - MTIME_SLACK_MS) await consider(`${cwd}/${entry.name}`)
+  if (scanCwd) {
+    for (const f of await cwdFiles($, cwd)) {
+      if (f.mtimeMs >= since - MTIME_SLACK_MS) await consider(f.path)
     }
-  } catch {
-    // An unreadable working directory adds nothing.
   }
 
   if (found.length === 0) return
@@ -145,7 +211,7 @@ async function track($: EngineInterface, raw: string[], since: number) {
     const rest = list.filter(a => !found.some(p => sameFile(p, a.path)))
     const fresh = found.map(path => list.find(a => sameFile(a.path, path)) ?? { path, addedAt: now })
 
-    return [...fresh, ...rest]
+    return unique([...fresh, ...rest])
   })
   await update($, page, () => 0)
   await persist($)
@@ -160,15 +226,16 @@ async function persist($: EngineInterface) {
   await $.store.set(await storeKey($), await read($, artifacts))
 }
 
-/** Drops every artifact whose file is gone from disk. */
+/** Drops every artifact whose file is gone from disk, is not a listed kind, or is listed twice. */
 async function prune($: EngineInterface) {
   const list = await read($, artifacts)
   const gone: string[] = []
   for (const a of list) {
-    if (!(await $.fs.exists(a.path))) gone.push(a.path)
+    if (IGNORED.test(a.path) || !isShown(a.path) || !(await $.fs.exists(a.path))) gone.push(a.path)
   }
-  if (gone.length === 0) return
-  await update($, artifacts, l => l.filter(a => !gone.includes(a.path)))
+  const isDuplicated = unique(list).length !== list.length
+  if (gone.length === 0 && !isDuplicated) return
+  await update($, artifacts, l => unique(l.filter(a => !gone.includes(a.path))))
   if (gone.includes(await read($, selected))) await update($, selected, () => '')
   await persist($)
 }
@@ -237,7 +304,12 @@ export const register: Register = on => {
     if ((await read($, artifacts)).length === 0) {
       const saved = await $.store.get(await storeKey($))
       if (Array.isArray(saved) && saved.length > 0) {
-        await update($, artifacts, () => saved as Artifact[])
+        // Lists saved before paths were normalized can hold one file twice.
+        await update($, artifacts, () =>
+          unique(
+            (saved as Artifact[]).map(a => ({ ...a, path: nativePath(a.path) })).filter(a => !IGNORED.test(a.path) && isShown(a.path)),
+          ),
+        )
       }
     }
     await prune($)
@@ -255,12 +327,22 @@ export const register: Register = on => {
   })
 
   on('tool.call', async ($, e, next) => {
+    const input = e as unknown as Record<string, unknown>
+    const named = candidatesOf(String(e.tool), input).filter(isShown)
+    let existed = new Set<string>()
+    try {
+      existed = await existing($, named)
+    } catch {
+      // Without a snapshot every file counts as new.
+    }
     const since = Date.now()
     const ran = await next(e)
-    if (ran.deny === undefined && ran.isReadOnly !== true) {
-      const raw = candidatesOf(String(e.tool), e as unknown as Record<string, unknown>)
+    if (ran.deny === undefined) {
+      // Read-only tools can still save a file they were told to (a browser screenshot's `filename`).
+      const readOnly = ran.isReadOnly === true
+      const raw = readOnly ? candidatesOf(String(e.tool), input, true).filter(isShown) : named
       try {
-        await track($, raw, since)
+        if (!readOnly || raw.length > 0) await track($, raw, since, !readOnly, existed)
       } catch {
         // Tracking never fails the tool call.
       }
