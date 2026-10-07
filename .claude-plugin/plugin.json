@@ -1,6 +1,6 @@
 {
   "name": "artifact-mod",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A side pane listing the media files and documents created in this session, with type icons, pagination, and open-with-default-app.",
   "author": { "name": "Michael Dobekidis" },
   "repository": "https://github.com/netgfx/claude-artifact-mod",
