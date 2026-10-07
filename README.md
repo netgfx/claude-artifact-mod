@@ -18,7 +18,7 @@ Answer `y` to add the marketplace, then pick a scope (user scope is the default)
 
 ## Features
 
-- **Automatic tracking.** After any tool call, files it created are added: paths named in the tool's input, path-like tokens in shell commands (`> out.txt`, `-o report.pdf`), and new files at the top level of the working directory. A read-only tool counts only for the file it was told to save (a browser screenshot's `filename`). Files that already existed and were only edited are left out, as are `.git`, `node_modules` and Claude Code's `.output` task logs.
+- **Automatic tracking.** After any tool call, files it created are added: paths named in the tool's input, path-like tokens in shell commands (`> out.txt`, `-o report.pdf`, `"$PWD/out.png"`), and new files at the top level of the working directory or in the folders of any paths the tool named. A read-only tool counts only for the file it was told to save (a browser screenshot's `filename`). Files that already existed and were only edited are left out, as are `.git`, `node_modules` and Claude Code's `.output` task logs.
 - **Paths only.** The mod stores each artifact's local path and nothing else. The list lasts for the session and survives resume.
 - **Stays in sync with disk.** Files deleted from disk disappear from the pane within a few seconds.
 - **Media and documents only.** 🎨 images, 📕 PDF, 📘 Word/ODT/RTF, 📙 slides, 📊 spreadsheets, 📝 text/Markdown, 🌐 HTML, 🎵 audio, 🎬 video. Code, config, archives and binaries are not listed.

@@ -17,16 +17,19 @@ const PANE = {
 /** A fake disk: `files` already exist; a writing tool creates the file it names, "now". */
 const KEY = 'a:C:\\work\\chart.png'
 const norm = (p: string) => p.replace(/\\/g, '/')
-function disk(on: On, files: Set<string>, opened: string[][]) {
+function disk(on: On, files: Set<string>, opened: string[][], bashWrites: string[] = []) {
   mock.store(on)
   mock.env(on, { OS: 'Windows_NT' })
   on('session.cwd', () => ({ value: 'C:/work' }))
   on('session.id', () => ({ value: 'sid-1' }))
-  on('fs.list', () => ({
-    value: [...files]
-      .filter(p => /^C:\/work\/[^/]+$/.test(p))
-      .map(p => ({ name: p.slice('C:/work/'.length), kind: 'file' as const, mtimeMs: Date.now() })),
-  }))
+  on('fs.list', (_$, e) => {
+    const dir = `${norm(e.path).replace(/\/$/, '')}/`
+    return {
+      value: [...files]
+        .filter(p => p.toLowerCase().startsWith(dir.toLowerCase()) && !p.slice(dir.length).includes('/'))
+        .map(p => ({ name: p.slice(dir.length), kind: 'file' as const, mtimeMs: Date.now() })),
+    }
+  })
   on('fs.exists', (_$, e) => ({ value: files.has(norm(e.path)) }))
   on('fs.stat', (_$, e) => {
     if (!files.has(norm(e.path))) return { deny: 'ENOENT' }
@@ -43,6 +46,7 @@ function disk(on: On, files: Set<string>, opened: string[][]) {
     const input = e as unknown as Record<string, unknown>
     const target = input.file_path ?? input.filename
     if (e.tool !== 'Read' && typeof target === 'string') files.add(norm(target))
+    if (e.tool === 'Bash') for (const p of bashWrites) files.add(p)
     return e.tool === 'Read' || e.tool === 'mcp__playwright__browser_take_screenshot'
       ? { result: {}, text: 'ok', isReadOnly: true as const }
       : { result: {}, text: 'ok' }
@@ -151,6 +155,33 @@ describe('artifact-mod', () => {
 
     const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
     expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a shell command writing to $PWD/... lists the file', async ($, on) => {
+    disk(on, new Set(), [], ['C:/work/docs/images/panel.svg', 'C:/work/docs/images/panel.png'])
+
+    await $.tool.call({
+      tool: 'Bash',
+      command:
+        'python mock.py docs/images/panel.svg && chrome.exe --headless=new ' +
+        '--screenshot="$(cygpath -w "$PWD/docs/images/panel.png")" "file:///$(cygpath -m "$PWD/docs/images/panel.svg")"',
+    })
+
+    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    expect(await ui.find({ key: 'a:C:\\work\\docs\\images\\panel.png' })).toBeDefined()
+    expect(await ui.find({ key: 'a:C:\\work\\docs\\images\\panel.svg' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('an unnamed output beside a named file is listed', async ($, on) => {
+    disk(on, new Set(['C:/work/docs/old.png']), [], ['C:/work/docs/chart.png'])
+
+    await $.tool.call({ tool: 'Bash', command: 'render docs/old.png --out "$OUT_DIR"' })
+
+    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    expect(await ui.find({ key: 'a:C:\\work\\docs\\chart.png' })).toBeDefined()
+    expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
     await ui.unmount()
   })
 

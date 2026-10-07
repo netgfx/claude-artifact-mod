@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a1d4a"/>
+      <stop offset="1" stop-color="#0d1b2a"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#d97757"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- back cards: a fanned stack of files -->
+  <g filter="url(#shadow)">
+    <g transform="rotate(-14 256 300)">
+      <rect x="150" y="128" width="200" height="252" rx="22" fill="#3f3f46"/>
+    </g>
+    <g transform="rotate(9 256 300)">
+      <rect x="166" y="120" width="200" height="252" rx="22" fill="#52525b"/>
+    </g>
+
+    <!-- front card: an image file -->
+    <path d="M176 112 h120 l58 58 v196 a22 22 0 0 1 -22 22 h-156 a22 22 0 0 1 -22 -22 v-232 a22 22 0 0 1 22 -22 z" fill="#f4f4f5"/>
+  </g>
+  <path d="M296 112 v40 a18 18 0 0 0 18 18 h40 z" fill="#d4d4d8"/>
+
+  <!-- picture inside the front card -->
+  <rect x="182" y="196" width="148" height="112" rx="12" fill="#18181b"/>
+  <circle cx="290" cy="228" r="14" fill="#febc2e"/>
+  <path d="M182 296 l42 -44 l30 30 l22 -20 l54 50 v-4 a12 12 0 0 1 -12 12 h-124 a12 12 0 0 1 -12 -12 z" fill="#22d3ee"/>
+  <path d="M182 296 l42 -44 l34 36 h-76 z" fill="#d97757" opacity="0.9"/>
+
+  <!-- text lines -->
+  <rect x="182" y="326" width="112" height="12" rx="6" fill="#a1a1aa"/>
+  <rect x="182" y="348" width="76" height="12" rx="6" fill="#d4d4d8"/>
+
+  <!-- "open" badge -->
+  <g filter="url(#shadow)">
+    <circle cx="370" cy="378" r="56" fill="url(#glow)"/>
+  </g>
+  <path d="M350 398 l40 -40 M362 358 h28 v28" fill="none" stroke="#fff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

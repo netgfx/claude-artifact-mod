@@ -131,7 +131,9 @@ function shellTokens(command: string): string[] {
   for (const m of command.matchAll(TOKEN)) {
     let token = m[1] ?? m[2] ?? m[3] ?? ''
     if (token.includes('=')) token = token.slice(token.lastIndexOf('=') + 1)
-    if (token === '' || token.includes('://') || token.startsWith('-')) continue
+    // `$PWD/out.png` is relative to the working directory; any other variable or substitution cannot be resolved.
+    token = token.replace(/^(\$PWD|\$\{PWD\})(?=[\\/])/, '.')
+    if (token === '' || token.includes('://') || token.startsWith('-') || /[$`~]/.test(token)) continue
     if (/[\\/]/.test(token) || /\.[A-Za-z0-9]{1,8}$/.test(token)) out.push(token)
     if (out.length >= 40) break
   }
@@ -145,13 +147,30 @@ function absOf(cwd: string, path: string): string {
   return nativePath(isAbsolute(path) ? path : `${cwd}/${path.replace(/^\.[\\/]/, '')}`)
 }
 
-async function cwdFiles($: EngineInterface, cwd: string): Promise<{ path: string; mtimeMs: number }[]> {
+const MAX_SCAN_DIRS = 8
+
+/**
+ * Where a tool may have written files without naming them: the working directory,
+ * and the folders of the paths it did name (a converter writing panel.png beside panel.svg).
+ */
+function scanDirs(cwd: string, raw: string[]): string[] {
+  const dirs: string[] = []
+  for (const dir of [nativePath(cwd), ...raw.map(p => dirName(absOf(cwd, p)))]) {
+    if (dir === '' || IGNORED.test(`${dir}\\`) || dirs.some(d => sameFile(d, dir))) continue
+    dirs.push(dir)
+    if (dirs.length >= MAX_SCAN_DIRS) break
+  }
+
+  return dirs
+}
+
+async function dirFiles($: EngineInterface, dir: string): Promise<{ path: string; mtimeMs: number }[]> {
   try {
-    return (await $.fs.list(cwd))
+    return (await $.fs.list(dir))
       .filter(entry => entry.kind === 'file' && isShown(entry.name))
-      .map(entry => ({ path: absOf(cwd, entry.name), mtimeMs: entry.mtimeMs }))
+      .map(entry => ({ path: absOf(dir, entry.name), mtimeMs: entry.mtimeMs }))
   } catch {
-    // An unreadable working directory adds nothing.
+    // A missing or unreadable folder adds nothing.
     return []
   }
 }
@@ -168,7 +187,9 @@ async function existing($: EngineInterface, raw: string[]): Promise<Set<string>>
       // Unknown: treated as new.
     }
   }
-  for (const f of await cwdFiles($, cwd)) keys.add(fileKey(f.path))
+  for (const dir of scanDirs(cwd, raw)) {
+    for (const f of await dirFiles($, dir)) keys.add(fileKey(f.path))
+  }
 
   return keys
 }
@@ -197,10 +218,12 @@ async function track($: EngineInterface, raw: string[], since: number, scanCwd: 
 
   for (const path of raw) await consider(path)
 
-  // Files a command wrote without naming them: the working directory's top level.
+  // Files a command wrote without naming them, in the folders it touched.
   if (scanCwd) {
-    for (const f of await cwdFiles($, cwd)) {
-      if (f.mtimeMs >= since - MTIME_SLACK_MS) await consider(f.path)
+    for (const dir of scanDirs(cwd, raw)) {
+      for (const f of await dirFiles($, dir)) {
+        if (f.mtimeMs >= since - MTIME_SLACK_MS) await consider(f.path)
+      }
     }
   }
 
