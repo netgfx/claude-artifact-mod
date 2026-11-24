@@ -353,7 +353,7 @@ export const register: Register = on => {
     await $.ui.open({ id: PANE, title: TITLE, focus: true })
 
     return { text: 'Artifacts pane opened. Tab selects, Enter or double-click opens.' }
-  })
+  }).catch(() => ({ text: 'The Artifacts pane could not open. Run with --debug to see why.' }))
 
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as Record<string, unknown>
