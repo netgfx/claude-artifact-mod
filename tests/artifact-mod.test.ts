@@ -252,3 +252,64 @@ for (const os of ['windows', 'posix'] as const) {
     })
   })
 }
+
+const DAY = 24 * 60 * 60 * 1000
+
+/** A store the test can read back, in place of mock.store */
+function fakeStore(on: On, store: Map<string, unknown>, deleted: string[] = []) {
+  on('store.keys', () => ({ value: [...store.keys()] }))
+  on('store.get', (_$, e) => ({ value: store.get(e.key) }))
+  on('store.set', (_$, e) => {
+    store.set(e.key, e.value)
+    return { value: undefined }
+  })
+  on('store.delete', (_$, e) => {
+    deleted.push(e.key)
+    store.delete(e.key)
+    return { value: undefined }
+  })
+}
+
+describe('the saved lists in $.store', () => {
+  test('a new file is saved under this session with the time it was saved', async ($, on) => {
+    const store = new Map<string, unknown>()
+    disk(on, 'posix', new Set(), [], [], false)
+    fakeStore(on, store)
+
+    const before = Date.now()
+    await $.tool.call({ tool: 'Write', file_path: '/work/chart.png', content: 'x' })
+
+    const saved = store.get('session:sid-1') as { updatedAt: number; artifacts: { path: string }[] }
+    expect(saved.artifacts.map(a => a.path)).toEqual(['/work/chart.png'])
+    expect(saved.updatedAt).toBeGreaterThanOrEqual(before)
+  })
+
+  test("session start deletes other sessions' lists after 30 days and keeps the rest", async ($, on) => {
+    const now = Date.now()
+    const store = new Map<string, unknown>([
+      ['session:old', { updatedAt: now - 31 * DAY, artifacts: [{ path: '/work/a.png', addedAt: now - 40 * DAY }] }],
+      ['session:recent', { updatedAt: now - 2 * DAY, artifacts: [{ path: '/work/b.png', addedAt: now - 2 * DAY }] }],
+      // The older shape, a bare array, is dated by its newest file
+      ['session:old-array', [{ path: '/work/c.png', addedAt: now - 45 * DAY }]],
+      ['session:recent-array', [{ path: '/work/d.png', addedAt: now - 3 * DAY }]],
+      ['session:sid-1', { updatedAt: now - 90 * DAY, artifacts: [{ path: '/work/mine.png', addedAt: now - 90 * DAY }] }],
+      ['other', 'kept'],
+    ])
+    const deleted: string[] = []
+    disk(on, 'posix', new Set(['/work/mine.png']), [], [], false)
+    fakeStore(on, store, deleted)
+    on('session.start', () => ({ cwd: '/work' }))
+    on('command.register', () => ({ value: { command: 'local-artifacts' } }))
+    mock.clock(on, { now })
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
+
+    expect(deleted.sort()).toEqual(['session:old', 'session:old-array'])
+    expect([...store.keys()].sort()).toEqual(['other', 'session:recent', 'session:recent-array', 'session:sid-1'])
+    // This session's own list is restored and saved again, which keeps it another 30 days
+    expect((store.get('session:sid-1') as { updatedAt: number }).updatedAt).toBeGreaterThanOrEqual(now)
+    const ui = await mount($)
+    expect(await ui.find({ key: 'a:/work/mine.png' })).toBeDefined()
+    await ui.unmount()
+  })
+})

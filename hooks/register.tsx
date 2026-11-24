@@ -242,12 +242,44 @@ async function track($: EngineInterface, raw: string[], since: number, scanCwd: 
   if (before === 0) void $.ui.open({ id: PANE, title: TITLE })
 }
 
+/** A session's saved list is deleted once the session hasn't opened or changed it for this long. */
+const KEEP_SESSION_MS = 30 * 24 * 60 * 60 * 1000
+
+/** What `$.store` holds under `session:<id>`: the list and when it was last saved. */
+type SavedList = { updatedAt: number; artifacts: Artifact[] }
+
 async function storeKey($: EngineInterface): Promise<string> {
   return `session:${await $.session.id()}`
 }
 
+/** A saved list in its current shape, or in the older shape: a bare array, dated by its newest file. */
+function savedListOf(value: unknown): SavedList | undefined {
+  if (Array.isArray(value)) {
+    const list = value as Artifact[]
+    return { updatedAt: Math.max(0, ...list.map(a => Number(a?.addedAt) || 0)), artifacts: list }
+  }
+  if (value !== null && typeof value === 'object' && Array.isArray((value as SavedList).artifacts)) {
+    const saved = value as SavedList
+    return { updatedAt: Number(saved.updatedAt) || 0, artifacts: saved.artifacts }
+  }
+
+  return undefined
+}
+
 async function persist($: EngineInterface) {
-  await $.store.set(await storeKey($), await read($, artifacts))
+  const saved: SavedList = { updatedAt: Date.now(), artifacts: await read($, artifacts) }
+  await $.store.set(await storeKey($), saved)
+}
+
+/** Deletes the saved lists of other sessions that haven't been opened or changed in KEEP_SESSION_MS. */
+async function forgetOldSessions($: EngineInterface) {
+  const current = await storeKey($)
+  const now = Date.now()
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith('session:') || key === current) continue
+    const saved = savedListOf(await $.store.get(key))
+    if (saved === undefined || now - saved.updatedAt > KEEP_SESSION_MS) await $.store.delete(key)
+  }
 }
 
 /** Drops every artifact whose file is gone from disk, is not a listed kind, or is listed twice. */
@@ -331,15 +363,22 @@ export const register: Register = on => {
     }
 
     if ((await read($, artifacts)).length === 0) {
-      const saved = await $.store.get(await storeKey($))
-      if (Array.isArray(saved) && saved.length > 0) {
+      const saved = savedListOf(await $.store.get(await storeKey($)))
+      if (saved !== undefined && saved.artifacts.length > 0) {
         // Lists saved before paths were normalized can hold one file twice.
         await update($, artifacts, () =>
           unique(
-            (saved as Artifact[]).map(a => ({ ...a, path: nativePath(a.path) })).filter(a => !IGNORED.test(a.path) && isShown(a.path)),
+            saved.artifacts.map(a => ({ ...a, path: nativePath(a.path) })).filter(a => !IGNORED.test(a.path) && isShown(a.path)),
           ),
         )
+        // Opening the session again keeps its list for another KEEP_SESSION_MS.
+        await persist($)
       }
+    }
+    try {
+      await forgetOldSessions($)
+    } catch {
+      // Old lists stay until the next session start; nothing else depends on it.
     }
     await prune($)
     $.clock.every(PRUNE_EVERY_MS, () => void prune($))
