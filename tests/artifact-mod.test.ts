@@ -14,26 +14,71 @@ const PANE = {
   },
 } as const
 
-/** A fake disk: `files` already exist; a writing tool creates the file it names, "now". */
-const KEY = 'a:C:\\work\\chart.png'
-const norm = (p: string) => p.replace(/\\/g, '/')
-function disk(on: On, files: Set<string>, opened: string[][], bashWrites: string[] = []) {
-  mock.store(on)
-  mock.env(on, { OS: 'Windows_NT' })
-  on('session.cwd', () => ({ value: 'C:/work' }))
+type Os = 'windows' | 'posix'
+
+/**
+ * Each test runs with the fixtures of a Windows session (C:/work) and of a POSIX
+ * session (/work). `at` spells a path under the working folder the way a tool
+ * would, and `key` is the key of that file's row in the pane.
+ */
+const OS = {
+  windows: {
+    root: 'C:/work',
+    env: { OS: 'Windows_NT' },
+    at: (rel: string) => `C:/work/${rel}`,
+    key: (rel: string) => `a:C:\\work\\${rel.replace(/\//g, '\\')}`,
+    opener: (rel: string) => ['explorer.exe', `C:\\work\\${rel.replace(/\//g, '\\')}`],
+  },
+  posix: {
+    root: '/work',
+    env: {},
+    at: (rel: string) => `/work/${rel}`,
+    key: (rel: string) => `a:/work/${rel}`,
+    opener: (rel: string) => ['xdg-open', `/work/${rel}`],
+  },
+} as const
+
+/**
+ * The runtime resolves a path before an fs stub sees it, and a path from the other
+ * OS is not absolute there: on a POSIX host C:\work\x arrives as /<cwd>/C:\work\x, and
+ * on a Windows host /work/x arrives with a drive letter. `canon` undoes that and
+ * spells the path with forward slashes, so the fake disk finds each file by the path
+ * the mod meant, and both sets of fixtures run on every host.
+ */
+function canon(os: Os, path: string): string {
+  let p = path
+  if (os === 'windows') {
+    const lastDrive = [...p.matchAll(/[A-Za-z]:[\\/]/g)].pop()
+    if (lastDrive !== undefined) p = p.slice(lastDrive.index ?? 0)
+  } else {
+    p = p.replace(/^[A-Za-z]:/, '')
+  }
+
+  return p.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
+}
+
+/**
+ * A fake disk: `files` already exist; a writing tool creates the file it names, "now".
+ * `withStore: false` leaves `$.store` for the test to stub.
+ */
+function disk(on: On, os: Os, files: Set<string>, opened: string[][], bashWrites: string[] = [], withStore = true) {
+  if (withStore) mock.store(on)
+  mock.env(on, OS[os].env)
+  on('session.cwd', () => ({ value: OS[os].root }))
   on('session.id', () => ({ value: 'sid-1' }))
   on('fs.list', (_$, e) => {
-    const dir = `${norm(e.path).replace(/\/$/, '')}/`
+    const dir = `${canon(os, e.path).replace(/\/$/, '')}/`
     return {
       value: [...files]
         .filter(p => p.toLowerCase().startsWith(dir.toLowerCase()) && !p.slice(dir.length).includes('/'))
-        .map(p => ({ name: p.slice(dir.length), kind: 'file' as const, mtimeMs: Date.now() })),
+        .map(p => ({ name: p.slice(dir.length), kind: 'file' as const, size: 1, isLink: false, mtimeMs: Date.now() })),
     }
   })
-  on('fs.exists', (_$, e) => ({ value: files.has(norm(e.path)) }))
+  on('fs.exists', (_$, e) => ({ value: files.has(canon(os, e.path)) }))
   on('fs.stat', (_$, e) => {
-    if (!files.has(norm(e.path))) return { deny: 'ENOENT' }
-    return { value: { kind: 'file', size: 1, mtimeMs: Date.now(), isLink: false, realPath: e.path } }
+    const path = canon(os, e.path)
+    if (!files.has(path)) return { deny: 'ENOENT' }
+    return { value: { kind: 'file', size: 1, mtimeMs: Date.now(), isLink: false, realPath: path } }
   })
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.toast', () => ({ value: undefined }))
@@ -45,7 +90,7 @@ function disk(on: On, files: Set<string>, opened: string[][], bashWrites: string
   on('tool.call', (_$, e) => {
     const input = e as unknown as Record<string, unknown>
     const target = input.file_path ?? input.filename
-    if (e.tool !== 'Read' && typeof target === 'string') files.add(norm(target))
+    if (e.tool !== 'Read' && typeof target === 'string') files.add(canon(os, target))
     if (e.tool === 'Bash') for (const p of bashWrites) files.add(p)
     return e.tool === 'Read' || e.tool === 'mcp__playwright__browser_take_screenshot'
       ? { result: {}, text: 'ok', isReadOnly: true as const }
@@ -53,147 +98,157 @@ function disk(on: On, files: Set<string>, opened: string[][], bashWrites: string
   })
 }
 
-describe('artifact-mod', () => {
-  test('a written file is listed with its icon, opened on Enter, dropped once deleted', async ($, on) => {
-    const files = new Set<string>()
-    const opened: string[][] = []
-    disk(on, files, opened)
+const mount = ($: any, surface: 'terminal' | 'desktop' = 'terminal') => $.ui.mount({ plugin: 'powermods-artifacts', surface, ...PANE })
 
-    await $.tool.call({ tool: 'Write', file_path: 'C:/work/chart.png', content: 'x' })
+for (const os of ['windows', 'posix'] as const) {
+  const { at, key, opener } = OS[os]
 
-    for (const surface of ['terminal', 'desktop'] as const) {
-      const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface, ...PANE })
-      const row = await ui.find({ key: KEY })
-      expect(row?.text).toContain('🎨 chart.png')
+  describe(`artifact-mod (${os})`, () => {
+    test('a written file is listed with its icon, opened on Enter, dropped once deleted', async ($, on) => {
+      const files = new Set<string>()
+      const opened: string[][] = []
+      disk(on, os, files, opened)
+
+      await $.tool.call({ tool: 'Write', file_path: at('chart.png'), content: 'x' })
+
+      for (const surface of ['terminal', 'desktop'] as const) {
+        const ui = await mount($, surface)
+        const row = await ui.find({ key: key('chart.png') })
+        expect(row?.text).toContain('🎨 chart.png')
+        await ui.unmount()
+      }
+
+      const ui = await mount($)
+      await ui.press({ key: key('chart.png') }) // selects
+      await ui.press({ key: key('chart.png') }) // second press opens
+      expect(opened).toContainEqual(opener('chart.png'))
+
+      files.delete(at('chart.png'))
+      await ui.press({ key: 'open' })
+      expect(await ui.find({ key: key('chart.png') })).toBeUndefined()
       await ui.unmount()
-    }
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    await ui.press({ key: KEY }) // selects
-    await ui.press({ key: KEY }) // second press opens
-    expect(opened).toContainEqual(['explorer.exe', 'C:\\work\\chart.png'])
-
-    files.delete('C:/work/chart.png')
-    await ui.press({ key: 'open' })
-    expect(await ui.find({ key: KEY })).toBeUndefined()
-    await ui.unmount()
-  })
-
-  test('many artifacts page through Next', async ($, on) => {
-    disk(on, new Set(), [])
-
-    for (let i = 0; i < 15; i++) await $.tool.call({ tool: 'Write', file_path: `C:/work/f${i}.txt`, content: 'x' })
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect((await ui.find({ text: /page 1\/3/ }))).toBeDefined()
-    await ui.press({ key: 'next' })
-    expect((await ui.find({ text: /page 2\/3/ }))).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('read-only tools add nothing', async ($, on) => {
-    disk(on, new Set(['C:/work/a.md']), [])
-
-    await $.tool.call({ tool: 'Read', file_path: 'C:/work/a.md' })
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('a read-only tool that saves a file still lists it', async ($, on) => {
-    disk(on, new Set(), [])
-
-    await $.tool.call({
-      tool: 'mcp__playwright__browser_take_screenshot',
-      filename: 'C:/work/assets/shot.png',
-      scale: 'css',
     })
 
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ key: 'a:C:\\work\\assets\\shot.png' })).toBeDefined()
-    await ui.unmount()
-  })
+    test('many artifacts page through Next', async ($, on) => {
+      disk(on, os, new Set(), [])
 
-  test('one file reached by two spellings is listed once', async ($, on) => {
-    disk(on, new Set(), [])
+      for (let i = 0; i < 15; i++) await $.tool.call({ tool: 'Write', file_path: at(`f${i}.txt`), content: 'x' })
 
-    // The cwd scan finds the same file the tool input names with backslashes.
-    await $.tool.call({ tool: 'Write', file_path: 'C:\\work\\NOTES.md', content: 'x' })
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('background task .output logs are not listed', async ($, on) => {
-    disk(on, new Set(), [])
-
-    await $.tool.call({ tool: 'Write', file_path: 'C:/tmp/claude/tasks/b1.output', content: 'x' })
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('code and config files are not listed', async ($, on) => {
-    disk(on, new Set(), [])
-
-    await $.tool.call({ tool: 'Write', file_path: 'C:/work/hooks/register.tsx', content: 'x' })
-    await $.tool.call({ tool: 'Write', file_path: 'C:/work/package.json', content: '{}' })
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('editing a file that existed before the session is not listed', async ($, on) => {
-    disk(on, new Set(['C:/work/README.md', 'C:/work/assets/logo.png']), [])
-
-    await $.tool.call({ tool: 'Edit', file_path: 'C:\\work\\README.md', old_string: 'a', new_string: 'b' })
-    await $.tool.call({ tool: 'Write', file_path: 'C:/work/assets/logo.png', content: 'x' })
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('a shell command writing to $PWD/... lists the file', async ($, on) => {
-    disk(on, new Set(), [], ['C:/work/docs/images/panel.svg', 'C:/work/docs/images/panel.png'])
-
-    await $.tool.call({
-      tool: 'Bash',
-      command:
-        'python mock.py docs/images/panel.svg && chrome.exe --headless=new ' +
-        '--screenshot="$(cygpath -w "$PWD/docs/images/panel.png")" "file:///$(cygpath -m "$PWD/docs/images/panel.svg")"',
+      const ui = await mount($)
+      expect(await ui.find({ text: /page 1\/3/ })).toBeDefined()
+      await ui.press({ key: 'next' })
+      expect(await ui.find({ text: /page 2\/3/ })).toBeDefined()
+      await ui.unmount()
     })
 
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ key: 'a:C:\\work\\docs\\images\\panel.png' })).toBeDefined()
-    expect(await ui.find({ key: 'a:C:\\work\\docs\\images\\panel.svg' })).toBeDefined()
-    await ui.unmount()
+    test('read-only tools add nothing', async ($, on) => {
+      disk(on, os, new Set([at('a.md')]), [])
+
+      await $.tool.call({ tool: 'Read', file_path: at('a.md') })
+
+      const ui = await mount($)
+      expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test('a read-only tool that saves a file still lists it', async ($, on) => {
+      disk(on, os, new Set(), [])
+
+      await $.tool.call({
+        tool: 'mcp__playwright__browser_take_screenshot',
+        filename: at('assets/shot.png'),
+        scale: 'css',
+      })
+
+      const ui = await mount($)
+      expect(await ui.find({ key: key('assets/shot.png') })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test('one file reached by two spellings is listed once', async ($, on) => {
+      disk(on, os, new Set(), [])
+
+      // The cwd scan finds the same file the tool input spells another way:
+      // with backslashes on Windows, with a doubled slash on POSIX.
+      const spelled = os === 'windows' ? 'C:\\work\\NOTES.md' : '/work//NOTES.md'
+      await $.tool.call({ tool: 'Write', file_path: spelled, content: 'x' })
+
+      const ui = await mount($)
+      expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test('background task .output logs are not listed', async ($, on) => {
+      disk(on, os, new Set(), [])
+
+      const log = os === 'windows' ? 'C:/tmp/claude/tasks/b1.output' : '/tmp/claude/tasks/b1.output'
+      await $.tool.call({ tool: 'Write', file_path: log, content: 'x' })
+
+      const ui = await mount($)
+      expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test('code and config files are not listed', async ($, on) => {
+      disk(on, os, new Set(), [])
+
+      await $.tool.call({ tool: 'Write', file_path: at('hooks/register.tsx'), content: 'x' })
+      await $.tool.call({ tool: 'Write', file_path: at('package.json'), content: '{}' })
+
+      const ui = await mount($)
+      expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test('editing a file that existed before the session is not listed', async ($, on) => {
+      disk(on, os, new Set([at('README.md'), at('assets/logo.png')]), [])
+
+      const readme = os === 'windows' ? 'C:\\work\\README.md' : at('README.md')
+      await $.tool.call({ tool: 'Edit', file_path: readme, old_string: 'a', new_string: 'b' })
+      await $.tool.call({ tool: 'Write', file_path: at('assets/logo.png'), content: 'x' })
+
+      const ui = await mount($)
+      expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test('a shell command writing to $PWD/... lists the file', async ($, on) => {
+      disk(on, os, new Set(), [], [at('docs/images/panel.svg'), at('docs/images/panel.png')])
+
+      await $.tool.call({
+        tool: 'Bash',
+        command:
+          'python mock.py docs/images/panel.svg && chrome.exe --headless=new ' +
+          '--screenshot="$(cygpath -w "$PWD/docs/images/panel.png")" "file:///$(cygpath -m "$PWD/docs/images/panel.svg")"',
+      })
+
+      const ui = await mount($)
+      expect(await ui.find({ key: key('docs/images/panel.png') })).toBeDefined()
+      expect(await ui.find({ key: key('docs/images/panel.svg') })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test('an unnamed output beside a named file is listed', async ($, on) => {
+      disk(on, os, new Set([at('docs/old.png')]), [], [at('docs/chart.png')])
+
+      await $.tool.call({ tool: 'Bash', command: 'render docs/old.png --out "$OUT_DIR"' })
+
+      const ui = await mount($)
+      expect(await ui.find({ key: key('docs/chart.png') })).toBeDefined()
+      expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
+      await ui.unmount()
+    })
+
+    test('a file this session made stays listed when rewritten', async ($, on) => {
+      disk(on, os, new Set(), [])
+
+      await $.tool.call({ tool: 'Write', file_path: at('report.pdf'), content: 'v1' })
+      await $.tool.call({ tool: 'Write', file_path: at('report.pdf'), content: 'v2' })
+
+      const ui = await mount($)
+      expect(await ui.find({ key: key('report.pdf') })).toBeDefined()
+      expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
+      await ui.unmount()
+    })
   })
-
-  test('an unnamed output beside a named file is listed', async ($, on) => {
-    disk(on, new Set(['C:/work/docs/old.png']), [], ['C:/work/docs/chart.png'])
-
-    await $.tool.call({ tool: 'Bash', command: 'render docs/old.png --out "$OUT_DIR"' })
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ key: 'a:C:\\work\\docs\\chart.png' })).toBeDefined()
-    expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
-    await ui.unmount()
-  })
-
-  test('a file this session made stays listed when rewritten', async ($, on) => {
-    disk(on, new Set(), [])
-
-    await $.tool.call({ tool: 'Write', file_path: 'C:/work/report.pdf', content: 'v1' })
-    await $.tool.call({ tool: 'Write', file_path: 'C:/work/report.pdf', content: 'v2' })
-
-    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
-    expect(await ui.find({ key: 'a:C:\\work\\report.pdf' })).toBeDefined()
-    expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
-    await ui.unmount()
-  })
-})
+}
