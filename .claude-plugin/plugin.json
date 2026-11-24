@@ -7,6 +7,7 @@
   "homepage": "https://github.com/netgfx/claude-artifact-mod",
   "repository": "https://github.com/netgfx/claude-artifact-mod",
   "license": "MIT",
+  "privacyPolicyUrl": "https://github.com/netgfx/claude-artifact-mod/blob/main/PRIVACY.md",
   "keywords": ["mod", "artifacts", "files", "media", "documents", "pane"],
   "network": { "hosts": [] },
   "types": "./types/index.d.ts"
