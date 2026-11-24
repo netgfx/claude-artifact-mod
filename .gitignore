@@ -2,3 +2,13 @@
 .claude-plugin/types/
 tsconfig.json
 node_modules/
+
+# Local debugging output: never ship it in the plugin folder
+.playwright-mcp/
+*.log
+
+# OS and editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+__MACOSX/
