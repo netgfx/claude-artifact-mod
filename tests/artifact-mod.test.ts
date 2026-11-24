@@ -62,13 +62,13 @@ describe('artifact-mod', () => {
     await $.tool.call({ tool: 'Write', file_path: 'C:/work/chart.png', content: 'x' })
 
     for (const surface of ['terminal', 'desktop'] as const) {
-      const ui = await $.ui.mount({ plugin: 'artifact-mod', surface, ...PANE })
+      const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface, ...PANE })
       const row = await ui.find({ key: KEY })
       expect(row?.text).toContain('🎨 chart.png')
       await ui.unmount()
     }
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     await ui.press({ key: KEY }) // selects
     await ui.press({ key: KEY }) // second press opens
     expect(opened).toContainEqual(['explorer.exe', 'C:\\work\\chart.png'])
@@ -84,7 +84,7 @@ describe('artifact-mod', () => {
 
     for (let i = 0; i < 15; i++) await $.tool.call({ tool: 'Write', file_path: `C:/work/f${i}.txt`, content: 'x' })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect((await ui.find({ text: /page 1\/3/ }))).toBeDefined()
     await ui.press({ key: 'next' })
     expect((await ui.find({ text: /page 2\/3/ }))).toBeDefined()
@@ -96,7 +96,7 @@ describe('artifact-mod', () => {
 
     await $.tool.call({ tool: 'Read', file_path: 'C:/work/a.md' })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
     await ui.unmount()
   })
@@ -110,7 +110,7 @@ describe('artifact-mod', () => {
       scale: 'css',
     })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ key: 'a:C:\\work\\assets\\shot.png' })).toBeDefined()
     await ui.unmount()
   })
@@ -121,7 +121,7 @@ describe('artifact-mod', () => {
     // The cwd scan finds the same file the tool input names with backslashes.
     await $.tool.call({ tool: 'Write', file_path: 'C:\\work\\NOTES.md', content: 'x' })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
     await ui.unmount()
   })
@@ -131,7 +131,7 @@ describe('artifact-mod', () => {
 
     await $.tool.call({ tool: 'Write', file_path: 'C:/tmp/claude/tasks/b1.output', content: 'x' })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
     await ui.unmount()
   })
@@ -142,7 +142,7 @@ describe('artifact-mod', () => {
     await $.tool.call({ tool: 'Write', file_path: 'C:/work/hooks/register.tsx', content: 'x' })
     await $.tool.call({ tool: 'Write', file_path: 'C:/work/package.json', content: '{}' })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
     await ui.unmount()
   })
@@ -153,7 +153,7 @@ describe('artifact-mod', () => {
     await $.tool.call({ tool: 'Edit', file_path: 'C:\\work\\README.md', old_string: 'a', new_string: 'b' })
     await $.tool.call({ tool: 'Write', file_path: 'C:/work/assets/logo.png', content: 'x' })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ text: /No artifacts yet/ })).toBeDefined()
     await ui.unmount()
   })
@@ -168,7 +168,7 @@ describe('artifact-mod', () => {
         '--screenshot="$(cygpath -w "$PWD/docs/images/panel.png")" "file:///$(cygpath -m "$PWD/docs/images/panel.svg")"',
     })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ key: 'a:C:\\work\\docs\\images\\panel.png' })).toBeDefined()
     expect(await ui.find({ key: 'a:C:\\work\\docs\\images\\panel.svg' })).toBeDefined()
     await ui.unmount()
@@ -179,7 +179,7 @@ describe('artifact-mod', () => {
 
     await $.tool.call({ tool: 'Bash', command: 'render docs/old.png --out "$OUT_DIR"' })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ key: 'a:C:\\work\\docs\\chart.png' })).toBeDefined()
     expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
     await ui.unmount()
@@ -191,7 +191,7 @@ describe('artifact-mod', () => {
     await $.tool.call({ tool: 'Write', file_path: 'C:/work/report.pdf', content: 'v1' })
     await $.tool.call({ tool: 'Write', file_path: 'C:/work/report.pdf', content: 'v2' })
 
-    const ui = await $.ui.mount({ plugin: 'artifact-mod', surface: 'terminal', ...PANE })
+    const ui = await $.ui.mount({ plugin: 'powermods-artifacts', surface: 'terminal', ...PANE })
     expect(await ui.find({ key: 'a:C:\\work\\report.pdf' })).toBeDefined()
     expect(await ui.find({ text: /^1 artifact$/ })).toBeDefined()
     await ui.unmount()

@@ -1,9 +1,13 @@
 {
-  "name": "artifact-mod",
-  "version": "0.3.1",
+  "name": "powermods-artifacts",
+  "displayName": "Local Artifacts",
+  "version": "0.4.0",
   "description": "A side pane listing the media files and documents created in this session, with type icons, pagination, and open-with-default-app.",
-  "author": { "name": "Michael Dobekidis" },
+  "author": { "name": "Michael Dobekidis", "email": "djmid71@gmail.com", "url": "https://github.com/netgfx" },
+  "homepage": "https://github.com/netgfx/claude-artifact-mod",
   "repository": "https://github.com/netgfx/claude-artifact-mod",
   "license": "MIT",
+  "keywords": ["mod", "artifacts", "files", "media", "documents", "pane"],
+  "network": { "hosts": [] },
   "types": "./types/index.d.ts"
 }

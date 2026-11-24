@@ -1,12 +1,24 @@
 {
   "name": "claude-artifact-mod",
-  "owner": { "name": "Michael Dobekidis" },
-  "metadata": { "description": "Claude Code mods for tracking and opening locally produced artifacts." },
+  "owner": { "name": "Michael Dobekidis", "email": "djmid71@gmail.com", "url": "https://github.com/netgfx" },
+  "metadata": {
+    "description": "Claude Code mods for tracking and opening locally produced artifacts.",
+    "version": "0.4.0"
+  },
   "plugins": [
     {
-      "name": "artifact-mod",
+      "name": "powermods-artifacts",
       "source": "./",
-      "description": "A side pane listing the media files and documents created in this session, with type icons, pagination, and open-with-default-app."
+      "description": "A side pane listing the media files and documents created in this session, with type icons, pagination, and open-with-default-app.",
+      "version": "0.4.0",
+      "author": { "name": "Michael Dobekidis", "email": "djmid71@gmail.com", "url": "https://github.com/netgfx" },
+      "homepage": "https://github.com/netgfx/claude-artifact-mod",
+      "repository": "https://github.com/netgfx/claude-artifact-mod",
+      "license": "MIT",
+      "category": "productivity"
     }
-  ]
+  ],
+  "renames": {
+    "artifact-mod": "powermods-artifacts"
+  }
 }

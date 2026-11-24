@@ -3,7 +3,7 @@ export type Artifact = { path: string; addedAt: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'artifact-mod': {
+    'powermods-artifacts': {
       artifacts: Artifact[]
       page: number
       selected: string

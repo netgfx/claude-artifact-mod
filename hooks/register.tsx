@@ -8,9 +8,9 @@ const TITLE = 'Artifacts'
 const ITEM = 'a:'
 const COMMAND = 'local-artifacts'
 
-const artifacts = atom({ plugin: 'artifact-mod', key: 'artifacts' } as const, [])
-const page = atom({ plugin: 'artifact-mod', key: 'page' } as const, 0)
-const selected = atom({ plugin: 'artifact-mod', key: 'selected' } as const, '')
+const artifacts = atom({ plugin: 'powermods-artifacts', key: 'artifacts' } as const, [])
+const page = atom({ plugin: 'powermods-artifacts', key: 'page' } as const, 0)
+const selected = atom({ plugin: 'powermods-artifacts', key: 'selected' } as const, '')
 
 /** A press on an already-selected row, or a second press inside this window, opens it. */
 const DOUBLE_MS = 500
