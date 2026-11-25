@@ -29,7 +29,7 @@ From a terminal: `claude plugin marketplace add netgfx/claude-artifact-mod`, the
 
 ## Features
 
-- **Automatic tracking.** After any tool call, files it created are added: paths named in the tool's input, path-like tokens in shell commands (`> out.txt`, `-o report.pdf`, `"$PWD/out.png"`), and new files at the top level of the working directory or in the folders of any paths the tool named. A read-only tool counts only for the file it was told to save (a browser screenshot's `filename`). Files that already existed and were only edited are left out, as are `.git`, `node_modules` and Claude Code's `.output` task logs.
+- **Automatic tracking.** After any tool call, files it created are added: paths named in the tool's input, path-like tokens in shell commands (`> out.txt`, `-o report.pdf`, and a path that starts with the shell's variable for the working folder, read as `./out.png`), and new files at the top level of the working directory or in the folders of any paths the tool named. A read-only tool counts only for the file it was told to save (a browser screenshot's `filename`). Files that already existed and were only edited are left out, as are `.git`, `node_modules` and Claude Code's `.output` task logs.
 - **Paths only.** The mod keeps each artifact's local path and when it was first seen, nothing else. The list survives resume, and is deleted 30 days after the session last opened or changed it.
 - **Stays in sync with disk.** Files deleted from disk disappear from the pane within a few seconds.
 - **Media and documents only.** 🎨 images, 📕 PDF, 📘 Word/ODT/RTF, 📙 slides, 📊 spreadsheets, 📝 text/Markdown, 🌐 HTML, 🎵 audio, 🎬 video. Code, config, archives and binaries are not listed.
@@ -51,6 +51,20 @@ The pane opens by itself when a session starts. Claude Code places a pane a mod 
 ## Data, network and permissions
 
 Everything stays on your machine. See [PRIVACY.md](PRIVACY.md) for the privacy statement.
+
+In short, for the directory's checks:
+
+- **Programs it runs:** only to open an item you choose, one fixed opener per system, given that file's path and nothing else: `explorer.exe` on Windows, `open` on macOS, `xdg-open` on Linux. On macOS and Linux it first runs `uname -s` once to tell them apart. Each is started with an argument list, never through a shell.
+- **What it sends and where:** nothing leaves the machine. The only data passed on is the path of the file you open, to the opener above, which hands it to your system's default app. File paths also go into the plugin's own local `$.store`.
+- **Conversation data it reads:** the input of each tool call, only to find the paths of files the tool writes. Those paths are kept in the local store and shown in the pane, and a path you open goes to the opener. Nothing from the conversation goes anywhere else: not to a model, a host or any other program.
+- **Hosts it contacts:** none.
+- **Files it writes:** none. It never writes a build, start-up, settings or instructions file.
+- **Hooks:**
+  - `session.start`: registers `/local-artifacts`, restores this session's list, deletes other sessions' lists older than 30 days and opens the pane. Changes nothing else.
+  - `command.run` for `/local-artifacts`: opens the pane. Changes nothing else.
+  - `tool.call` on every tool: notes the files a tool writes. Passes every call on unchanged; never approves, denies, rewrites or blocks one.
+  - `ui.focus`: tracks which row of its own pane is selected, and passes the event on unchanged.
+  - `ui.render` for its own pane only: draws the list.
 
 **Tool calls it watches**
 
