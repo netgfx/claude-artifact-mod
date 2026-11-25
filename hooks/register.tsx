@@ -318,15 +318,12 @@ async function openArtifact($: EngineInterface, path: string) {
     return
   }
   const os = await detectPlatform($)
-  const argv =
-    os === 'win'
-      ? ['explorer.exe', path.replace(/\//g, '\\')]
-      : os === 'mac'
-        ? ['open', path]
-        : ['xdg-open', path]
   try {
+    // One fixed opener per OS, given only the file's path.
     // explorer.exe exits 1 even when it opened the file, so the code is not checked.
-    await $.process.run(argv, { timeoutMs: 15000 })
+    if (os === 'win') await $.process.run(['explorer.exe', path.replace(/\//g, '\\')], { timeoutMs: 15000 })
+    else if (os === 'mac') await $.process.run(['open', path], { timeoutMs: 15000 })
+    else await $.process.run(['xdg-open', path], { timeoutMs: 15000 })
     $.ui.toast(`Opened ${baseName(path)}`)
   } catch (err) {
     $.ui.toast(`Could not open ${baseName(path)}: ${String(err)}`)
